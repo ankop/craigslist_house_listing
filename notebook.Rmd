@@ -1,0 +1,603 @@
+---
+title: "Extracting Features using Regex and stringr package of Messy(unstructured) Craigslist House Listings data set"
+author: "Ankita Giri"
+date: "09/03/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+## Data: 
+The data set used for analysis in this project are posts for rental apartment listings on Craigslist. It is an
+unstructured data with 601 text files and each file represents each apartment listing posts made on Craigslist. The dataset and rmarkdown can be accessed from the above Code access link. The
+location of the listing posts are California, USA. The data set is used for extracting several information about
+rental prices, deposit amounts, kinds of pets allowed, pet deposit, heating and air conditioning systems. The
+information is further used to analyze any trend or patterns.
+
+**This project was done as a part of project submission in a class.**
+---
+
+### `read_posts` and `read_all_posts`:
+
+
+Two functions read_posts and read_all_posts are created to control loading and usage of the data set.
+The function read_posts loads files. This function has only one parameter called “file” for controlling which
+file is loaded. As an addition to the suggested function format, Using str_c() the contents in each file is
+combined as a single character vector for convenience.
+The function read_all_posts loads directories. The function has a parameter “directory” that controls
+which directory is to be loaded. The previously created function read_posts is used with in the function
+read_all_posts to control the files that are loaded within the directory that read_all_posts loads. The
+function read_all_posts returning value is a data frame where the columns is a collection of files and each
+row is a character vector (each file represents a single character vector).
+In this project, the “housing” directory is the data set used and the files are each listing posts in the mention
+in the “housing” data set.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+# Set wd(working directory) to the current script location
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+# Clear variables in the global environment
+rm(list = ls())
+
+library(dplyr)
+library(kableExtra)
+library(stringr)
+library(ggplot2)
+
+```
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+#Parameters in the function `read_post`: 
+# * File - Controls which File is loaded 
+
+
+#Function to load files  
+read_post = function(file){
+  post = readLines(file, encoding = "UTF-8")
+  str_c(post, collapse = "\n")
+}
+```
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+
+#Parameters in the function `read_all_post`: 
+# * directory - controls which directory to load the files from
+
+#Function to load directory 
+read_all_posts = function(directory) {
+  file = list.files(directory, full.names = TRUE)
+  data.frame(sapply(file, read_post))
+}
+
+#Load the housing directory 
+housing = read_all_posts("housing")
+names(housing) = c("listing")
+```
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+kable(head(housing, 2), col.names = c('Listings'),
+      caption = "House Listings")
+```
+
+
+# Rental Price
+
+
+The title for each post is on the first line. From the combined string for each post,
+the first `\n` will represent the end of the first line which is the title for the post. Then, the separated title and the remainder of the information is stored as two separate columns as a data frame called "posts". From the title, the amount value of the rental price for the apartment listing is then extracted and stored in a new column as a numeric value. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+
+
+#First line separated by "\n" is the title of each listing
+
+#TO DO: 
+#Extract the title and add a column containing all 
+#the titles for the listing
+
+#splitting the listing column into a matrix of title and remaining text
+result = str_split_fixed(housing$listing, "\n", 2)
+#First column: title of listing
+housing$title = result[,1]
+#Second column: remaining text of listing
+housing$text_remain = result[,2]
+
+
+#Extract the amount from the title of each listing
+price_raw = str_extract(housing$title, "(?<=\\$)\\d(,)\\d{3}|\\d{2,4}")
+#Remove the "," from the extracted amount to convert into numeric values
+#then store as a new column in the data frame "posts"
+housing$price = as.numeric(str_remove_all(price_raw, ","))
+
+#Check how many listings do not have price in the title
+number_of_NA = table(is.na(housing$price))
+
+kable(head(housing[,c(1,4)],2), col.names = c('Listing', 'Rental Price'),
+      caption = "House Listings and Rental Price Extracted(first few)")
+
+```
+
+Using `is.na()`, a check for the NA values is done to make sure that the majority of the listing prices are extracted. There 3 listing which does not have rental price included in the listing.  
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+kable(number_of_NA, col.names = c('No Listing Price', "Number of Listings"),
+      caption = "Number of Listings with and without Rental Price")
+```
+
+
+
+**Limitations:**
+
+There are 3 posts that do not have listing prices on the title so they are returned as NA values. 
+
+Also, some posts contain additional listing for more apartments that is not in the title. Therefore such listings have not been accounted for. So, the price column do not accurately represent all the apartment listings in the housing directory. 
+
+
+
+
+
+# Deposit Amount:
+
+The deposit amount is listed in different patterns in the listings so several patterns for extracting the deposit amount is explored. 
+
+Some patterns explored are: 
+
+  * Deposit: $amount 
+  
+  * Deposit $amount
+  
+  * Deposit($amount)
+  
+  * Deposit (one word) $amount. 
+  
+  * Deposit (two words) $amount.
+  
+  * $amount Deposit
+  
+  * $amount.0000 Deposit
+  
+  * $amount (one word) Deposit
+  
+  * $amount.0000 (one word)Deposit
+  
+  * Deposit:  $amount
+  
+Using regex patterns and string manipulation functions from stringr package, the deposit amounts are extraced and all the extracted values are stored in the column 
+deposit_amount in the housing data frame. 
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+housing = housing[-2]
+
+#Patterns to explore for extracting Deposit amount: 
+# *Deposit: $amount     *Deposit $amount
+# *Deposit($amount)     *Deposit (word) $amount
+# $amount is Deposit    *$amount Deposit
+# $amount.000 Deposit
+
+#1. Pattern - Deposit: $amount
+re1 = regex("(Deposit: \\$)([0-9,]+)", 
+            ignore_case = TRUE)
+#2. Pattern - Deposit $amount
+re2 = regex("(Deposit \\$)([0-9,]+)",
+            ignore_case = TRUE)
+#3. Pattern - Deposit($amount)
+re3 = regex("(Deposit \\(\\$)([0-9,]+)",
+            ignore_case = TRUE)
+#4. Pattern - Deposit (one word) $amount. 
+#Eg: Deposit is $1000
+re4 = regex("(Deposit [a-z]+ \\$)([0-9,]+)", 
+            ignore_case = TRUE)
+#5. Pattern -  Deposit (two words) $amount. Eg: Deposit here is $1000
+re5 = regex("(Deposit [a-z]+ [a-z]+ \\$)([0-9,]+)",
+            ignore_case = TRUE)
+#6. Pattern - $amount Deposit
+re6 = regex("(\\$)([0-9,]+)( Deposit)",
+            ignore_case = TRUE)
+#7. Pattern - $amount.0000 Deposit
+re7 = regex("(\\$)([0-9,]+)(\\.[0-9]+)( Deposit)",
+            ignore_case = TRUE)
+#8. Pattern - $amount (one word) Deposit
+#Eg: $4000 Security Deposit, $5000 is Deposit
+re8 = regex("(\\$)([0-9,]+)( [a-z]+)( Deposit)", 
+            ignore_case = TRUE)
+#9. Pattern - $amount.0000 (one word)Deposit
+#Eg: $4000.00 Security Deposit, $5000.00 is Deposit
+re9 = regex("(\\$)([0-9,]+)(\\.[0-9]+)( [a-z]+)( Deposit)",
+            ignore_case = TRUE)
+#10. Pattern - Deposit:  $amount
+re10 = regex("(Deposit:  [\\$,])([0-9,]+)", 
+            ignore_case = TRUE)
+
+
+#Match each pattern using `str_match()` to the 
+#text_remain in housing data frame to
+#create a matrix of each matched patterns
+m1 = str_match(housing$text_remain, re1)#pattern match 1
+m1 = as.numeric(str_remove(m1[,3], ","))
+m2 = str_match(housing$text_remain, re2) #pattern match 2
+m2 = as.numeric(str_remove(m2[,3], ","))
+m3 = str_match(housing$text_remain, re3) #pattern match 3
+m3 = as.numeric(str_remove(m3[,3], ","))
+m4 = str_match(housing$text_remain, re4) #pattern match 4
+m4 = as.numeric(str_remove(m4[,3], ","))
+m5 = str_match(housing$text_remain, re5) #pattern match 5
+m5 = as.numeric(str_remove(m5[,3], ","))
+m6 = str_match(housing$text_remain, re6) #pattern match 6 
+m6 = as.numeric(str_remove(m6[,3], ","))
+m7 = str_match(housing$text_remain, re7) #pattern match 7 
+m7 = as.numeric(str_remove(m7[,3], ","))
+m8 = str_match(housing$text_remain, re8) #pattern match 8
+m8 = as.numeric(str_remove(m8[,3], ","))
+m9 = str_match(housing$text_remain, re9) #pattern match 9 
+m9 = as.numeric(str_remove(m9[,3], ","))
+m10 = str_match(housing$text_remain, re10) #pattern match 10
+m10 = as.numeric(str_remove(m10[,3], ","))
+
+
+#Data frame of all the deposit values extracted from each pattern
+combined_data = data.frame(m1,m2,m3,m4,m5,m6,m7,m8,m9,m10)
+
+#Combining the all the deposit amounts to one column
+combined_data = combined_data %>% 
+  mutate( deposit = pmax(m1,m2,m3,m4,m5,m6,m7,m8,m9,m10, na.rm = T)) %>%
+  select(deposit)
+         
+  
+  
+#Pasting the deposit column from the combined_data data frame
+#to the housing data frame
+housing = data.frame(housing, combined_data)
+
+#Removing the title joined from the combined_data
+#data frame to reduce redundancy
+housing$deposit = as.numeric(housing$deposit)
+
+#Check for NA values in the deposit
+na_values_deposit = table(is.na(housing$deposit))
+
+kable(head(housing[,c(1,3,4)],5), col.names = c('Listing', 'Rental Price', 'Deposit'),
+      caption = "House Listings and Deposit Price Extracted(first few)")
+```
+
+
+**Some Limitations of Extracting Deposit Amounts:**
+
+- Posts with multiple listings had multiple deposit amounts, hence only the first   pattern match is extracted. 
+
+- There are several unextracted pattern formats like "Deposit: 1 month's rent", "Deposit: 1.5 * rent", "Deposit: One month rent" for the purpose of keeping the values numeric. This was done so that the relationship between the rental price and the deposit amount could be explored. 
+
+- It is also possible that unknown patterns may not have been explored. 
+
+- Some posts may have listing for pet deposits only and hence the extracted deposit amounts may have included pet deposit listings too.
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+kable(na_values_deposit, col.names = c('No Deposit Price', "Number of Listings"),
+      caption = "Number of Listings with and without Deposit Price")
+```
+
+There are 380 listings whose deposit feature either did not exist or has not been extracted because of the limitations mentioned earlier. 
+
+
+
+# Relationship between Rental Price and Deposit Amount:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width= 7, fig.height=3}
+
+#Scatter plot to visualize trend between Rental Price and Deposit Amount
+
+ggplot(housing, 
+       aes(price, y = deposit)) +
+  geom_point(size = 0.5, color = "firebrick", alpha = 0.5)+ 
+  geom_smooth(method = "lm", color = "Steelblue")+
+  labs(title = "Relationship between Rental Price & Deposit Amount",
+       subtitle = "Data Source: Craigslist Housing Dataset for CA, US",
+       x = "Rental Price",
+       y = "Deposit Amount")+ theme_bw()
+```
+
+
+The linear regression line is fitted in the scatter plot between the rental price and the deposit amount shows that there is a slight positive correlation between the two. This means that for most apartment listings, the higher the rental price, the higher will be the deposit amount. 
+
+
+# Pets: 
+
+**Categorical Feature that measures whether the apartment allows pets: cats, dogs or both, or none and also other kind of pets if any.**
+
+
+For the Categorical feature measuring whether the apartments allow pets, information if cats, dogs or both are allowed is relevant. Also information regarding whether if no pets are allowed is relevant. 
+
+If the type of pet is not mentioned, the value is "yes". The rest is NA values due to lack of information. 
+
+Patterns tested for pets allowed: 
+
+  * Pet- friendly
+  
+  * Pets are OK
+  
+  * Pets are allowed
+
+Patterns tested for pets not allowed: 
+
+ * No pets allowed
+ 
+ * Pets not allowed
+ 
+ * Pets are not allowed 
+ 
+Patterns tested for cats: 
+
+  * Cats are OK
+  
+Patterns tested for Dogs:
+
+  *Dogs are OK
+  
+A pattern check was done to check whether other pets are allowed and no conclusive information was found. 
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+
+#TEST FOR PETS ALLOWED: 
+
+#Patterns to match: 
+yes_pet_1 = regex("(pet)(-)(friendly)", ignore_case = TRUE)
+yes_pet_2 = regex("(pet)(s)( are)( OK)", ignore_case = TRUE)
+yes_pet_3 = regex("(pet)(s)( are)( allowed)", ignore_case = TRUE)
+cats = regex("(cats)( are)( OK)", 
+             ignore_case = TRUE)
+dogs = regex("(dogs)( are)( OK)",
+             ignore_case = TRUE)
+no_pets_1 = regex("(no)( pets)",
+                  ignore_case = TRUE)
+no_pets_2 = regex("(pets)( not)( allowed)", 
+                  ignore_case = TRUE)
+#Matched: 
+m1 = str_match(housing$text_remain, yes_pet_1)[,2]
+m2 = str_match(housing$text_remain, yes_pet_2)[,2]
+m3 = str_match(housing$text_remain, yes_pet_3)[,2]
+m4 = str_match(housing$text_remain, cats)[,2]
+m5 = str_match(housing$text_remain, dogs)[,2]
+m6 = str_match(housing$text_remain, no_pets_1)[,2]
+m7 = str_match(housing$text_remain, no_pets_2)[,2]
+
+#Data frame to store the values
+yes_pet = data.frame(m1,m2,m3,m4,m5,m6,m7)
+
+yes_pet = yes_pet %>% 
+  mutate( pets = paste(m1,m2,m3,m4,m5,m6,m7, sep = " ")) %>%
+  select(pets)
+
+
+yes_pet['new']= str_remove_all(yes_pet$pets, "NA")
+yes_pet$new = str_remove_all(yes_pet$new, " ") 
+
+
+
+yes_pet$new = tolower(yes_pet$new)
+yes_pet$new = str_replace_all(yes_pet$new, "catsno", "no")
+yes_pet$new = str_replace_all(yes_pet$new, "catsdogsno", "no")
+yes_pet$new =str_replace_all(yes_pet$new, "petcatsdogs", "cats & dogs")
+yes_pet$new =str_replace_all(yes_pet$new, "petpetcats", "cats")
+
+yes_pet$new = str_replace_all(yes_pet$new, "catsdogs", "cats & dogs")
+yes_pet$new =str_replace_all(yes_pet$new, "petcats", "cats")
+yes_pet$new =str_replace_all(yes_pet$new, "petpet",
+                             "PetsOK")
+yes_pet$new =str_replace_all(yes_pet$new, "pet",
+                             "PetsOK")
+yes_pet <- yes_pet %>% mutate_all(na_if,"")
+
+
+yes_pet['pets_allowed'] = yes_pet['new']
+
+housing = data.frame(housing, yes_pet[3])
+
+```
+
+```{r  message=FALSE, warning=FALSE, echo = FALSE}
+
+
+#NA values for the pet information
+na_values_pets = table(is.na(housing$pets_allowed))
+
+kable(head(housing[,c(1,5)],5), col.names = c('Listing', 'Pets Allowed'),
+      caption = "House Listings and Pets Allowed Information(first few)")
+```
+
+```{r  message=FALSE, warning=FALSE, echo = FALSE}
+na_values_pets = table(is.na(housing$pets_allowed))
+kable(na_values_pets, col.names = c('No pets info extracted', 'Number of Listings'),
+      caption = "Number of Listings without Pet Information")
+```
+
+There are 155 listings with no pet information. This could have occurred because of unexplored patterns for some category.  
+
+```{r  message=FALSE, warning=FALSE, echo = FALSE}
+#Pet Deposit: 
+
+re1 = regex("(pet|pets)( deposit: \\$)([0-9,]+)",
+            ignore_case = TRUE)
+re2 = regex("(pet|pets)( deposit \\$)([0-9,]+)",
+            ignore_case = TRUE)
+re3 = regex("(pet|pets)( fee)( \\$)([0-9,]+)",
+            ignore_case = TRUE)
+re4  = regex("(extra )(\\$)([0-9,]+)( deposit)", 
+             ignore_case = TRUE)
+re5  = regex("(extra deposit)(\\$)([0-9,]+)",
+             ignore_case = TRUE)
+
+m1 = as.numeric(str_match(housing$text_remain, re1)[,4])
+m2 = as.numeric(str_match(housing$text_remain, re2)[,4])
+m3 = as.numeric(str_match(housing$text_remain, re3)[,4])
+m4 = as.numeric(str_match(housing$text_remain, re4)[,4])
+
+
+deposit_pet = data.frame(m1,m2,m3,m4)
+
+deposit_pet = deposit_pet %>% 
+  mutate( deposit = pmax(m1,m2,m3,m4, na.rm = T)) %>%
+         select(deposit)
+
+housing = data.frame(housing, deposit_pet)
+housing['Pet Deposit'] = housing$deposit.1
+housing = housing[-6]
+```
+
+```{r message=FALSE, warning=FALSE, echo = FALSE,, fig.width= 7, fig.height=3}
+
+#Plot visualizing Categorical Features for Pets
+
+ggplot(housing) +
+  geom_bar(aes(y = pets_allowed, fill = pets_allowed))+
+  labs(title = "Visualization of the Spread of the Pets Data",
+       subtitle = "Data Source: Craigslist Housing Dataset for CA, US",
+       y = "Mention of Pets")+
+  scale_fill_discrete(name = "Pets Allowed")+ theme_bw()
+```
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+na_values_pets = table(is.na(housing$`Pet Deposit`))
+kable(na_values_pets, col.names = c('No pets deposit information', 'Number of Listings'),
+      caption = "Number of Listings without Pet Deposit Information")
+```
+
+**Limitations:**
+
+For the Pet Deposit, the data is extremely sparse therefore has been ommitted from visualization. Upon exploring several reasons were found like:
+
+  * Pet Rent is taken instead of Deposits
+  
+  * All existing Patterns for Pet Deposit may not have been explored
+  
+  * Another existing key word was Pet Fee for each cat and dog that is charged monthly
+
+# Heating and Air Conditioning
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+
+#TEST FOR HEATING: 
+
+#Heater:
+re1_heater = regex("(heater)", ignore_case = TRUE)
+m1 = str_match(housing$text_remain, re1_heater)
+m1 = data.frame(str_replace_na(m1[,2]))
+
+#Fireplace
+re2_fireplace = regex("(fireplace)", ignore_case = TRUE)
+m2 = str_match(housing$text_remain, re2_fireplace)
+m2 = data.frame(str_replace_na(m2[,2]))
+
+#Stove
+re3_stove = regex("(stove)", ignore_case = TRUE)
+m3 = str_match(housing$text_remain, re3_stove)
+m3 = data.frame(str_replace_na(m3[,2]))
+
+#Central Heating
+re4_heater = regex("(Central Heat)", ignore_case = TRUE)
+m4 = str_match(housing$text_remain, re4_heater)
+m4 = data.frame(str_replace_na(m4[,2]))
+
+
+#Data frame to store all the heating information
+heating = data.frame(m1, m2, m4)
+names(heating) = c("heater", "fireplace", "centralheat")
+heating$heat = paste(heating$heater, heating$fireplace, heating$centralheat,
+                     sep = " ")
+heating$heat = str_remove_all(heating$heat, "NA")
+heating$heat = tolower(heating$heat)
+heating$heat = str_remove_all(heating$heat, " ")
+
+#Categories
+heating$heat = str_replace(heating$heat, "heaterfireplace", "heater,fireplace")
+heating$heat = str_replace(heating$heat, 
+                           "heaterfireplacestove", "heater,fireplace,stove")
+heating$heat = str_replace(heating$heat, "heaterstove", "heater,stove")
+#heating$heat = str_replace(heating$heat, "bothstove", "both")
+heating$heat = str_replace(heating$heat, "fireplacestove", "fireplace,stove")
+heating$heat = str_replace(heating$heat,
+                           "heatercentralheat", "heater,centralheat")
+heating$heat = str_replace(heating$heat,
+                           "fireplacecentralheat", "fireplace,centralheat")
+
+heating <- heating %>% mutate_all(na_if,"")
+housing['heating'] = heating$heat
+```
+
+The heating system are categorized into different factors like fireplace, heater. 
+
+Below is a graphical representation of the spread of the data. 
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE, fig.width= 7, fig.height=3}
+
+#Plot visualizing Categorical Features for Heating System
+
+ggplot(heating) +
+  geom_bar(aes(y = heat, fill = heat))+
+  labs(title = "Relationship between Different Heating Methods",
+       subtitle = "Data Source: Craigslist Housing Dataset for CA, US",
+       y = "Heating System")+
+  scale_fill_discrete(name = "Heating System")+ theme_bw()
+```
+
+
+
+There are 390 listings without heating system information. 
+
+```{r  message=FALSE, warning=FALSE, echo = FALSE}
+
+
+#TEST FOR AIR CONDITIONING:
+
+re_air_1 = regex("([a-z]+)( air)( condition)", ignore_case = TRUE)
+m1 = str_match(housing$text_remain, re_air_1)[,3]
+re_air_2 = regex("([a-z]+)( air)( condition)", ignore_case = TRUE)
+m2 = str_match(housing$text_remain, re_air_2)[,3]
+
+
+air= data.frame (m1, m2)
+air['new'] = paste(air$m1, air$m2)
+
+air$new = str_remove_all(air$new, "NA")
+air$new = tolower(air$new)
+air$new = str_remove_all(air$new, " ")
+
+air <- air %>% mutate_all(na_if,"")
+housing['air'] = air$new
+housing['air'] = str_replace(housing$air, "airair", "yes")
+```
+
+```{r  message=FALSE, warning=FALSE, echo = FALSE, fig.width= 7, fig.height=3}
+ggplot(housing) +
+  geom_bar(aes(y = air, fill = air))+
+  labs(title = "Air Conditioning Mentioned in the Lisitings",
+       subtitle = "Data Source: Craigslist Housing Dataset for CA, US",
+       y = "Heating/Air System")+
+  scale_fill_discrete(name = "")+ theme_bw()
+```
+
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+kable(housing[,c(1,5,7,8)][295:296, ], col.names = c('Listing', 'Pets Allowed', 'Heating System', 'Air Condition'),
+      caption = "House Listings and Available Heating System")
+na_values_pets = table(is.na(housing$heating))
+kable(na_values_pets, col.names = c('No Heating System information', 'Number of Listings'),
+      caption = "Number of Listings without Heating System Information")
+```
+
+**Limitation:**
+
+There are several missing values which could indicate either relevant patterns are not explored or that the information regarding heating is not included in the listing post. 
+
+
